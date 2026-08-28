@@ -47,7 +47,6 @@ GEMINI_PROMPTS = {
     "manhole": "Is there an open, damaged, or missing manhole cover visible in this image? Assess severity 0-100 (0=safe, 100=fully open/dangerous). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
     "streetlight": "Is there a broken, non-functional, or damaged street light visible in this image? Assess severity 0-100 (0=working fine, 100=completely broken/missing). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
     "water_leakage": "Is there visible water leakage, flooding, burst pipe, or waterlogging in this image? Assess severity 0-100 (0=none, 100=severe flooding). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
-    "auto": "Identify the main civic infrastructure issue in this image (pothole, garbage, open manhole, broken streetlight, water leakage, road damage, or other). Assess severity 0-100. Reply ONLY with valid JSON: {\"detected\": true/false, \"issue_type\": \"type here\", \"severity\": 0-100, \"description\": \"one sentence\"}",
 }
 
 
@@ -60,7 +59,6 @@ def root():
 def issue_types():
     return {
         "types": [
-            "auto",
             "pothole",
             "road_damage",
             "garbage",
@@ -171,7 +169,7 @@ def analyze_with_gemini(image_path: str, issue_type: str):
 @app.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
-    issue_type: str = Query(default="auto", description="Type of issue: auto, pothole, road_damage, garbage, manhole, streetlight, water_leakage")
+    issue_type: str = Query(default="pothole", description="Select issue type: pothole, road_damage, garbage, manhole, streetlight, water_leakage")
 ):
     contents = await file.read()
 
