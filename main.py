@@ -127,7 +127,7 @@ def analyze_with_gemini(image_path: str, issue_type: str):
         return res
 
     try:
-        model_names = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.6-flash", "gemini-1.5-flash"]
+        model_names = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-1.5-flash"]
         prompt = GEMINI_PROMPTS.get(issue_type.lower().strip(), GEMINI_PROMPTS["auto"])
         img = Image.open(image_path)
 
