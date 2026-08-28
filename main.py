@@ -102,6 +102,33 @@ def analyze_with_yolo(image_path: str, issue_type: str):
     }
 
 
+def get_gemini_model():
+    candidates = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+    try:
+        all_models = [
+            m.name.replace("models/", "")
+            for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        ]
+        # Prefer models with 'flash' in name
+        flash_models = [m for m in all_models if "flash" in m.lower()]
+        if flash_models:
+            return genai.GenerativeModel(flash_models[0])
+        elif all_models:
+            return genai.GenerativeModel(all_models[0])
+    except Exception:
+        pass
+
+    # Fallback to candidate list
+    for model_name in candidates:
+        try:
+            return genai.GenerativeModel(model_name)
+        except Exception:
+            continue
+
+    return genai.GenerativeModel("gemini-1.5-flash")
+
+
 def analyze_with_gemini(image_path: str, issue_type: str):
     if not GEMINI_API_KEY:
         return {
@@ -114,7 +141,7 @@ def analyze_with_gemini(image_path: str, issue_type: str):
         }
 
     try:
-        gemini_model = genai.GenerativeModel("gemini-3.6-flash")
+        gemini_model = get_gemini_model()
         prompt = GEMINI_PROMPTS.get(issue_type.lower().strip(), GEMINI_PROMPTS["auto"])
 
         # Pass PIL Image directly — simplest and most reliable
@@ -128,7 +155,7 @@ def analyze_with_gemini(image_path: str, issue_type: str):
         if json_match:
             data = json.loads(json_match.group())
         else:
-            data = {"detected": False, "severity": 0, "description": "Could not parse response."}
+            data = {"detected": False, "severity": 0, "description": text or "Could not parse response."}
 
         return {
             "detected": data.get("detected", False),
