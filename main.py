@@ -1,7 +1,9 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
+from PIL import Image
 import tempfile
+import io
 import os
 
 app = FastAPI(title="CivicPulse AI")
@@ -43,7 +45,12 @@ async def analyze(file: UploadFile = File(...)):
         image_path = temp.name
 
     try:
-        results = model(image_path)
+        # Resize to max 640px to speed up CPU inference
+        img = Image.open(image_path)
+        img.thumbnail((640, 640))
+        img.save(image_path)
+
+        results = model(image_path, verbose=False)
 
         detections = []
         for result in results:
