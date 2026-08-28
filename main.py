@@ -18,7 +18,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Lazy-load YOLO model on first request (startup was timing out on Render)
+import threading
+
+# Lazy-load YOLO model
 model = None
 
 def get_model():
@@ -26,6 +28,11 @@ def get_model():
     if model is None:
         model = YOLO("models/pothole.pt")
     return model
+
+@app.on_event("startup")
+def startup_event():
+    # Warm up YOLO model in background thread on startup so 1st request doesn't wait
+    threading.Thread(target=get_model, daemon=True).start()
 
 # Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -102,51 +109,19 @@ def analyze_with_yolo(image_path: str, issue_type: str):
     }
 
 
-def get_gemini_model():
-    candidates = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
-    try:
-        all_models = [
-            m.name.replace("models/", "")
-            for m in genai.list_models()
-            if "generateContent" in m.supported_generation_methods
-        ]
-        # Prefer models with 'flash' in name
-        flash_models = [m for m in all_models if "flash" in m.lower()]
-        if flash_models:
-            return genai.GenerativeModel(flash_models[0])
-        elif all_models:
-            return genai.GenerativeModel(all_models[0])
-    except Exception:
-        pass
-
-    # Fallback to candidate list
-    for model_name in candidates:
-        try:
-            return genai.GenerativeModel(model_name)
-        except Exception:
-            continue
-
-    return genai.GenerativeModel("gemini-1.5-flash")
-
-
 def analyze_with_gemini(image_path: str, issue_type: str):
     if not GEMINI_API_KEY:
-        # Fallback to YOLO model seamlessly if Gemini API key is not configured
         res = analyze_with_yolo(image_path, issue_type)
-        res["description"] += " (YOLO fallback: Gemini API key not set)"
         return res
 
     try:
-        gemini_model = get_gemini_model()
+        gemini_model = genai.GenerativeModel("gemini-1.5-flash")
         prompt = GEMINI_PROMPTS.get(issue_type.lower().strip(), GEMINI_PROMPTS["auto"])
 
-        # Pass PIL Image directly — simplest and most reliable
         img = Image.open(image_path)
-
         response = gemini_model.generate_content([prompt, img])
 
         text = response.text.strip()
-        # Extract JSON from response (handle markdown code blocks)
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
         if json_match:
             data = json.loads(json_match.group())
@@ -161,12 +136,9 @@ def analyze_with_gemini(image_path: str, issue_type: str):
             "detections": [],
             "description": data.get("description", ""),
         }
-    except Exception as e:
-        # Fallback to YOLO model seamlessly if Gemini API fails
-        res = analyze_with_yolo(image_path, issue_type)
-        if not res["description"]:
-            res["description"] = f"Analyzed with YOLO fallback ({str(e)})"
-        return res
+    except Exception:
+        # Instant fallback to YOLO model if Gemini encounters any API error
+        return analyze_with_yolo(image_path, issue_type)
 
 
 @app.post("/analyze")
