@@ -1,13 +1,13 @@
+import io
+import json
+import os
+import re
+from PIL import Image
 from fastapi import FastAPI, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
-from ultralytics import YOLO
-from PIL import Image
+from fastapi.concurrency import run_in_threadpool
 import google.generativeai as genai
-import tempfile
-import os
-import base64
-import json
-import re
+from ultralytics import YOLO
 
 app = FastAPI(title="CivicPulse AI")
 
@@ -18,26 +18,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Lazy-load YOLO model
-model = None
+# ---------------------------------------------------------
+# 1. Global Model Initialization (Loaded ONCE at server boot)
+# ---------------------------------------------------------
+MODEL_PATH = "models/pothole.pt"
+yolo_model = YOLO(MODEL_PATH)
 
-def get_model():
-    global model
-    if model is None:
-        model = YOLO("models/pothole.pt")
-    return model
-
-# Configure Gemini
+# Configure Gemini API if key exists
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# Issue types handled by YOLO vs Gemini
 YOLO_ISSUES = {"pothole", "potholes", "road_damage", "road_damages"}
 
 GEMINI_PROMPTS = {
     "pothole": "Is there a pothole or road surface damage visible in this image? Assess severity 0-100 (0=smooth road, 100=severe deep pothole). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
-    "potholes": "Is there a pothole or road surface damage visible in this image? Assess severity 0-100 (0=smooth road, 100=severe deep pothole). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
     "road_damage": "Is there road damage, cracking, or pothole visible in this image? Assess severity 0-100 (0=good condition, 100=severe destruction). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
     "garbage": "Is there uncollected garbage, waste, or litter visible in this image? Assess severity 0-100 (0=clean, 100=severe overflow). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
     "manhole": "Is there an open, damaged, or missing manhole cover visible in this image? Assess severity 0-100 (0=safe, 100=fully open/dangerous). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
@@ -71,14 +66,15 @@ def severity_from_box(confidence: float, box_area: float, image_area: float) -> 
     return int(min(max(score, 0), 100))
 
 
-def analyze_with_yolo(image_path: str, issue_type: str):
+# ---------------------------------------------------------
+# 2. In-Memory YOLO Analysis (No Disk I/O, 416x416 Input)
+# ---------------------------------------------------------
+def _sync_analyze_yolo(img: Image.Image, issue_type: str):
     try:
-        img = Image.open(image_path).convert("RGB")
-        img.thumbnail((416, 416))
-        img.save(image_path, format="JPEG")
+        img_resized = img.copy()
+        img_resized.thumbnail((416, 416))
 
-        # Set conf=0.15 sensitivity for reliable pothole detection
-        results = get_model()(image_path, conf=0.15, verbose=False)
+        results = yolo_model(img_resized, conf=0.15, verbose=False)
         detections = []
 
         for result in results:
@@ -114,14 +110,16 @@ def analyze_with_yolo(image_path: str, issue_type: str):
         }
 
 
-def analyze_with_gemini(image_path: str, issue_type: str):
+# ---------------------------------------------------------
+# 3. Gemini Vision Analysis
+# ---------------------------------------------------------
+def _sync_analyze_gemini(img: Image.Image, issue_type: str):
     if not GEMINI_API_KEY:
-        return analyze_with_yolo(image_path, issue_type)
+        return _sync_analyze_yolo(img, issue_type)
 
     try:
         model_names = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-1.5-flash"]
         prompt = GEMINI_PROMPTS.get(issue_type.lower().strip(), GEMINI_PROMPTS["pothole"])
-        img = Image.open(image_path)
 
         response = None
         last_err = None
@@ -154,26 +152,22 @@ def analyze_with_gemini(image_path: str, issue_type: str):
             "description": data.get("description", ""),
         }
     except Exception:
-        return analyze_with_yolo(image_path, issue_type)
+        return _sync_analyze_yolo(img, issue_type)
 
 
+# ---------------------------------------------------------
+# 4. Non-Blocking Async Endpoint
+# ---------------------------------------------------------
 @app.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
     issue_type: str = Query(default="pothole", description="Select issue type: pothole, road_damage, garbage, manhole, streetlight, water_leakage")
 ):
     contents = await file.read()
-
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp:
-        temp.write(contents)
-        image_path = temp.name
-
+    image = Image.open(io.BytesIO(contents)).convert("RGB")
     clean_issue_type = issue_type.lower().strip()
 
-    try:
-        if clean_issue_type in YOLO_ISSUES:
-            return analyze_with_yolo(image_path, clean_issue_type)
-        else:
-            return analyze_with_gemini(image_path, clean_issue_type)
-    finally:
-        os.remove(image_path)
+    if clean_issue_type in YOLO_ISSUES:
+        return await run_in_threadpool(_sync_analyze_yolo, image, clean_issue_type)
+    else:
+        return await run_in_threadpool(_sync_analyze_gemini, image, clean_issue_type)
