@@ -36,6 +36,9 @@ if GEMINI_API_KEY:
 YOLO_ISSUES = {"pothole", "potholes", "road_damage", "road_damages"}
 
 GEMINI_PROMPTS = {
+    "pothole": "Is there a pothole or road surface damage visible in this image? Assess severity 0-100 (0=smooth road, 100=severe deep pothole). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
+    "potholes": "Is there a pothole or road surface damage visible in this image? Assess severity 0-100 (0=smooth road, 100=severe deep pothole). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
+    "road_damage": "Is there road damage, cracking, or pothole visible in this image? Assess severity 0-100 (0=good condition, 100=severe destruction). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
     "garbage": "Is there uncollected garbage, waste, or litter visible in this image? Assess severity 0-100 (0=clean, 100=severe overflow). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
     "manhole": "Is there an open, damaged, or missing manhole cover visible in this image? Assess severity 0-100 (0=safe, 100=fully open/dangerous). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
     "streetlight": "Is there a broken, non-functional, or damaged street light visible in this image? Assess severity 0-100 (0=working fine, 100=completely broken/missing). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
@@ -70,7 +73,6 @@ def severity_from_box(confidence: float, box_area: float, image_area: float) -> 
 
 def analyze_with_yolo(image_path: str, issue_type: str):
     try:
-        # Convert image to RGB & resize to 416x416 max for 3x faster CPU detection
         img = Image.open(image_path).convert("RGB")
         img.thumbnail((416, 416))
         img.save(image_path, format="JPEG")
@@ -113,13 +115,11 @@ def analyze_with_yolo(image_path: str, issue_type: str):
 
 def analyze_with_gemini(image_path: str, issue_type: str):
     if not GEMINI_API_KEY:
-        res = analyze_with_yolo(image_path, issue_type)
-        res["description"] = f"[YOLO Fallback: GEMINI_API_KEY not set] {res['description']}"
-        return res
+        return analyze_with_yolo(image_path, issue_type)
 
     try:
         model_names = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-1.5-flash"]
-        prompt = GEMINI_PROMPTS.get(issue_type.lower().strip(), GEMINI_PROMPTS["auto"])
+        prompt = GEMINI_PROMPTS.get(issue_type.lower().strip(), GEMINI_PROMPTS["pothole"])
         img = Image.open(image_path)
 
         response = None
@@ -152,11 +152,9 @@ def analyze_with_gemini(image_path: str, issue_type: str):
             "detections": [],
             "description": data.get("description", ""),
         }
-    except Exception as e:
-        # Fallback to YOLO model if Gemini encounters any API error
-        res = analyze_with_yolo(image_path, issue_type)
-        res["description"] = f"[YOLO Fallback: Gemini API error: {str(e)}] {res['description']}"
-        return res
+    except Exception:
+        # Fallback seamlessly to local YOLO model
+        return analyze_with_yolo(image_path, issue_type)
 
 
 @app.post("/analyze")
@@ -173,9 +171,7 @@ async def analyze(
     clean_issue_type = issue_type.lower().strip()
 
     try:
-        if clean_issue_type in YOLO_ISSUES:
-            return analyze_with_yolo(image_path, clean_issue_type)
-        else:
-            return analyze_with_gemini(image_path, clean_issue_type)
+        # Gemini Flash primary for ALL issue types (1-2s cloud TPU speed)
+        return analyze_with_gemini(image_path, clean_issue_type)
     finally:
         os.remove(image_path)
