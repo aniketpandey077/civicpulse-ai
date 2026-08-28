@@ -114,7 +114,7 @@ def analyze_with_gemini(image_path: str, issue_type: str):
         }
 
     try:
-        gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+        gemini_model = genai.GenerativeModel("gemini-2.0-flash")
         prompt = GEMINI_PROMPTS.get(issue_type, GEMINI_PROMPTS["auto"])
 
         # Pass PIL Image directly — simplest and most reliable
