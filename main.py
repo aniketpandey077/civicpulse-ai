@@ -127,11 +127,24 @@ def analyze_with_gemini(image_path: str, issue_type: str):
         return res
 
     try:
-        gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+        model_names = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.6-flash", "gemini-1.5-flash"]
         prompt = GEMINI_PROMPTS.get(issue_type.lower().strip(), GEMINI_PROMPTS["auto"])
-
         img = Image.open(image_path)
-        response = gemini_model.generate_content([prompt, img])
+
+        response = None
+        last_err = None
+        for m_name in model_names:
+            try:
+                g_model = genai.GenerativeModel(m_name)
+                response = g_model.generate_content([prompt, img])
+                if response and response.text:
+                    break
+            except Exception as err:
+                last_err = err
+                continue
+
+        if not response or not response.text:
+            raise last_err or Exception("Gemini generation failed")
 
         text = response.text.strip()
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
