@@ -131,14 +131,10 @@ def get_gemini_model():
 
 def analyze_with_gemini(image_path: str, issue_type: str):
     if not GEMINI_API_KEY:
-        return {
-            "detected": False,
-            "issue_type": issue_type,
-            "count": 0,
-            "severity": 0,
-            "detections": [],
-            "description": "Gemini API key not configured. Set GEMINI_API_KEY env var.",
-        }
+        # Fallback to YOLO model seamlessly if Gemini API key is not configured
+        res = analyze_with_yolo(image_path, issue_type)
+        res["description"] += " (YOLO fallback: Gemini API key not set)"
+        return res
 
     try:
         gemini_model = get_gemini_model()
@@ -166,14 +162,11 @@ def analyze_with_gemini(image_path: str, issue_type: str):
             "description": data.get("description", ""),
         }
     except Exception as e:
-        return {
-            "detected": False,
-            "issue_type": issue_type,
-            "count": 0,
-            "severity": 0,
-            "detections": [],
-            "description": f"Analysis error: {str(e)}",
-        }
+        # Fallback to YOLO model seamlessly if Gemini API fails
+        res = analyze_with_yolo(image_path, issue_type)
+        if not res["description"]:
+            res["description"] = f"Analyzed with YOLO fallback ({str(e)})"
+        return res
 
 
 @app.post("/analyze")
