@@ -18,8 +18,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-import threading
-
 # Lazy-load YOLO model
 model = None
 
@@ -28,20 +26,6 @@ def get_model():
     if model is None:
         model = YOLO("models/pothole.pt")
     return model
-
-def _warmup_yolo():
-    try:
-        m = get_model()
-        # Warmup PyTorch using a pure PIL image (no numpy dependency)
-        dummy = Image.new("RGB", (416, 416), color="black")
-        m(dummy, verbose=False)
-    except Exception:
-        pass
-
-@app.on_event("startup")
-def startup_event():
-    # Full PyTorch CPU warmup in background thread on startup
-    threading.Thread(target=_warmup_yolo, daemon=True).start()
 
 # Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
