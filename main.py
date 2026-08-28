@@ -110,39 +110,43 @@ def analyze_with_gemini(image_path: str, issue_type: str):
             "count": 0,
             "severity": 0,
             "detections": [],
-            "description": "Gemini API key not configured.",
+            "description": "Gemini API key not configured. Set GEMINI_API_KEY env var.",
         }
 
-    gemini_model = genai.GenerativeModel("gemini-1.5-flash")
-    prompt = GEMINI_PROMPTS.get(issue_type, GEMINI_PROMPTS["auto"])
+    try:
+        gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+        prompt = GEMINI_PROMPTS.get(issue_type, GEMINI_PROMPTS["auto"])
 
-    with open(image_path, "rb") as f:
-        image_data = base64.b64encode(f.read()).decode("utf-8")
+        # Pass PIL Image directly — simplest and most reliable
+        img = Image.open(image_path)
 
-    img = Image.open(image_path)
-    mime_type = "image/jpeg"
+        response = gemini_model.generate_content([prompt, img])
 
-    response = gemini_model.generate_content([
-        prompt,
-        {"mime_type": mime_type, "data": image_data}
-    ])
+        text = response.text.strip()
+        # Extract JSON from response (handle markdown code blocks)
+        json_match = re.search(r'\{.*\}', text, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group())
+        else:
+            data = {"detected": False, "severity": 0, "description": "Could not parse response."}
 
-    text = response.text.strip()
-    # Extract JSON from response (handle markdown code blocks)
-    json_match = re.search(r'\{.*\}', text, re.DOTALL)
-    if json_match:
-        data = json.loads(json_match.group())
-    else:
-        data = {"detected": False, "severity": 0, "description": "Could not parse response."}
-
-    return {
-        "detected": data.get("detected", False),
-        "issue_type": data.get("issue_type", issue_type),
-        "count": 1 if data.get("detected") else 0,
-        "severity": data.get("severity", 0),
-        "detections": [],
-        "description": data.get("description", ""),
-    }
+        return {
+            "detected": data.get("detected", False),
+            "issue_type": data.get("issue_type", issue_type),
+            "count": 1 if data.get("detected") else 0,
+            "severity": data.get("severity", 0),
+            "detections": [],
+            "description": data.get("description", ""),
+        }
+    except Exception as e:
+        return {
+            "detected": False,
+            "issue_type": issue_type,
+            "count": 0,
+            "severity": 0,
+            "detections": [],
+            "description": f"Analysis error: {str(e)}",
+        }
 
 
 @app.post("/analyze")
