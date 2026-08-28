@@ -77,7 +77,8 @@ def analyze_with_yolo(image_path: str, issue_type: str):
         img.thumbnail((416, 416))
         img.save(image_path, format="JPEG")
 
-        results = get_model()(image_path, verbose=False)
+        # Set conf=0.15 sensitivity for reliable pothole detection
+        results = get_model()(image_path, conf=0.15, verbose=False)
         detections = []
 
         for result in results:
@@ -153,7 +154,6 @@ def analyze_with_gemini(image_path: str, issue_type: str):
             "description": data.get("description", ""),
         }
     except Exception:
-        # Fallback seamlessly to local YOLO model
         return analyze_with_yolo(image_path, issue_type)
 
 
@@ -171,7 +171,9 @@ async def analyze(
     clean_issue_type = issue_type.lower().strip()
 
     try:
-        # Gemini Flash primary for ALL issue types (1-2s cloud TPU speed)
-        return analyze_with_gemini(image_path, clean_issue_type)
+        if clean_issue_type in YOLO_ISSUES:
+            return analyze_with_yolo(image_path, clean_issue_type)
+        else:
+            return analyze_with_gemini(image_path, clean_issue_type)
     finally:
         os.remove(image_path)
