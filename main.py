@@ -18,8 +18,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load YOLO model once at startup
-model = YOLO("models/pothole.pt")
+# Lazy-load YOLO model on first request (startup was timing out on Render)
+model = None
+
+def get_model():
+    global model
+    if model is None:
+        model = YOLO("models/pothole.pt")
+    return model
 
 # Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -69,7 +75,7 @@ def analyze_with_yolo(image_path: str, issue_type: str):
     img.thumbnail((640, 640))
     img.save(image_path)
 
-    results = model(image_path, verbose=False)
+    results = get_model()(image_path, verbose=False)
     detections = []
 
     for result in results:
