@@ -33,7 +33,7 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 # Issue types handled by YOLO vs Gemini
-YOLO_ISSUES = {"pothole", "road_damage"}
+YOLO_ISSUES = {"pothole", "potholes", "road_damage", "road_damages"}
 
 GEMINI_PROMPTS = {
     "garbage": "Is there uncollected garbage, waste, or litter visible in this image? Assess severity 0-100 (0=clean, 100=severe overflow). Reply ONLY with valid JSON: {\"detected\": true/false, \"severity\": 0-100, \"description\": \"one sentence\"}",
@@ -114,8 +114,8 @@ def analyze_with_gemini(image_path: str, issue_type: str):
         }
 
     try:
-        gemini_model = genai.GenerativeModel("gemini-2.0-flash")
-        prompt = GEMINI_PROMPTS.get(issue_type, GEMINI_PROMPTS["auto"])
+        gemini_model = genai.GenerativeModel("gemini-3.6-flash")
+        prompt = GEMINI_PROMPTS.get(issue_type.lower().strip(), GEMINI_PROMPTS["auto"])
 
         # Pass PIL Image directly — simplest and most reliable
         img = Image.open(image_path)
@@ -160,10 +160,12 @@ async def analyze(
         temp.write(contents)
         image_path = temp.name
 
+    clean_issue_type = issue_type.lower().strip()
+
     try:
-        if issue_type in YOLO_ISSUES:
-            return analyze_with_yolo(image_path, issue_type)
+        if clean_issue_type in YOLO_ISSUES:
+            return analyze_with_yolo(image_path, clean_issue_type)
         else:
-            return analyze_with_gemini(image_path, issue_type)
+            return analyze_with_gemini(image_path, clean_issue_type)
     finally:
         os.remove(image_path)
