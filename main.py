@@ -78,35 +78,46 @@ def severity_from_box(confidence: float, box_area: float, image_area: float) -> 
 
 
 def analyze_with_yolo(image_path: str, issue_type: str):
-    img = Image.open(image_path)
-    img.thumbnail((640, 640))
-    img.save(image_path)
+    try:
+        # Convert image to RGB mode (handles PNG with alpha, WEBP, etc.)
+        img = Image.open(image_path).convert("RGB")
+        img.thumbnail((640, 640))
+        img.save(image_path, format="JPEG")
 
-    results = get_model()(image_path, verbose=False)
-    detections = []
+        results = get_model()(image_path, verbose=False)
+        detections = []
 
-    for result in results:
-        img_h, img_w = result.orig_shape
-        image_area = img_h * img_w
-        for box in result.boxes:
-            confidence = float(box.conf[0])
-            x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
-            box_area = (x2 - x1) * (y2 - y1)
-            detections.append({
-                "confidence": round(confidence, 3),
-                "box": [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)],
-                "severity": severity_from_box(confidence, box_area, image_area),
-            })
+        for result in results:
+            img_h, img_w = result.orig_shape
+            image_area = img_h * img_w
+            for box in result.boxes:
+                confidence = float(box.conf[0])
+                x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
+                box_area = (x2 - x1) * (y2 - y1)
+                detections.append({
+                    "confidence": round(confidence, 3),
+                    "box": [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)],
+                    "severity": severity_from_box(confidence, box_area, image_area),
+                })
 
-    max_severity = max((d["severity"] for d in detections), default=0)
-    return {
-        "detected": len(detections) > 0,
-        "issue_type": issue_type,
-        "count": len(detections),
-        "severity": max_severity,
-        "detections": detections,
-        "description": f"{len(detections)} {issue_type.replace('_', ' ')}(s) detected." if detections else "No issue detected.",
-    }
+        max_severity = max((d["severity"] for d in detections), default=0)
+        return {
+            "detected": len(detections) > 0,
+            "issue_type": issue_type,
+            "count": len(detections),
+            "severity": max_severity,
+            "detections": detections,
+            "description": f"{len(detections)} {issue_type.replace('_', ' ')}(s) detected." if detections else "No issue detected.",
+        }
+    except Exception as e:
+        return {
+            "detected": False,
+            "issue_type": issue_type,
+            "count": 0,
+            "severity": 0,
+            "detections": [],
+            "description": f"Analysis error: {str(e)}",
+        }
 
 
 def analyze_with_gemini(image_path: str, issue_type: str):
