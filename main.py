@@ -18,7 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-import numpy as np
+import threading
 
 # Lazy-load YOLO model
 model = None
@@ -32,8 +32,8 @@ def get_model():
 def _warmup_yolo():
     try:
         m = get_model()
-        # Run dummy 416x416 matrix through model to warm up PyTorch CPU kernels
-        dummy = np.zeros((416, 416, 3), dtype=np.uint8)
+        # Warmup PyTorch using a pure PIL image (no numpy dependency)
+        dummy = Image.new("RGB", (416, 416), color="black")
         m(dummy, verbose=False)
     except Exception:
         pass
